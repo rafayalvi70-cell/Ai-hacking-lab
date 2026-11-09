@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-dark: #080c0f;
+    --card-dark: #0f151b;
+    --border-dark: #1b2530;
+    --emerald-accent: #10b981;
+    --cyan-accent: #06b6d4;
+  }
+
+  body {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #080c0f;
+    color: #e2e8f0;
+    overflow-x: hidden;
+  }
+
+  /* Urdu typography when RTL */
+  [dir="rtl"] {
+    font-family: 'Noto Nastaliq Urdu', 'Inter', system-ui, sans-serif;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  }
+}
+
+/* Custom cyber scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #090d10;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #10b981;
+}
+
+/* Subtle scanline and terminal effect */
+.cyber-glow {
+  box-shadow: 0 0 20px -5px rgba(16, 185, 129, 0.25);
+}
+
+.cyber-glow-cyan {
+  box-shadow: 0 0 20px -5px rgba(6, 182, 212, 0.25);
+}
+
+.terminal-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background-color: #10b981;
+  vertical-align: middle;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cyber-grid {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(16, 185, 129, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(16, 185, 129, 0.03) 1px, transparent 1px);
+}
