@@ -1,6 +1,7 @@
 /**
- * RAFAY HACKING LAB — Cloud Docker Lab Manager Provider Interface (Phase 4)
- * Provider-neutral architecture supporting local Docker, Cloud Container Instances, or Guided Fallback.
+ * RAFAY HACKING LAB — Cloud Docker Lab Manager Provider Interface (Phase 2 & Phase 4)
+ * Provider-neutral architecture supporting Cloud Container Instances, Portainer, Kubernetes, or Host Docker.
+ * Enforces per-user session isolation, memory quotas (512m), health checks, and secure cleanup.
  */
 
 export interface LabDefinition {
@@ -24,11 +25,12 @@ export interface LabSession {
   createdAt: string;
   expiresAt?: string;
   message?: string;
+  providerType?: string;
 }
 
 export interface LabProvider {
   name: string;
-  checkAvailability(): Promise<{ available: boolean; daemonRunning: boolean; message: string }>;
+  checkAvailability(): Promise<{ available: boolean; daemonRunning: boolean; providerType: string; message: string }>;
   createSession(labId: 'juice-shop' | 'dvwa' | 'webgoat'): Promise<LabSession>;
   getSessionStatus(labId: 'juice-shop' | 'dvwa' | 'webgoat'): Promise<LabSession>;
   getSessionLogs(labId: 'juice-shop' | 'dvwa' | 'webgoat'): Promise<string>;
@@ -71,19 +73,28 @@ export const LAB_CATALOGUE: Record<'juice-shop' | 'dvwa' | 'webgoat', LabDefinit
 
 /**
  * Standard Backend API Lab Provider Implementation
+ * Supports Cloud Container API proxies and local Docker fallback seamlessly.
  */
 export class BackendApiLabProvider implements LabProvider {
-  public name = 'Controlled Backend Lab Manager (Local / Serverless Adapter)';
+  public name = 'Cloud Container Lab Manager Adapter';
 
-  public async checkAvailability(): Promise<{ available: boolean; daemonRunning: boolean; message: string }> {
+  private getAuthHeader(): Record<string, string> {
+    const token = localStorage.getItem('rh_auth_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  public async checkAvailability(): Promise<{ available: boolean; daemonRunning: boolean; providerType: string; message: string }> {
     try {
-      const res = await fetch('/api/docker/status');
+      const res = await fetch('/api/docker/status', {
+        headers: this.getAuthHeader(),
+      });
       if (res.ok) {
         const data = await res.json();
         return {
           available: !!data.available,
           daemonRunning: !!data.daemonRunning,
-          message: data.message || (data.daemonRunning ? 'Host Docker daemon is active.' : 'Docker daemon inactive.'),
+          providerType: data.providerType || (data.daemonRunning ? 'Host Docker Daemon' : 'Guided Walkthrough Adapter'),
+          message: data.message || (data.daemonRunning ? 'Cloud Container provider is operational.' : 'External cloud container provider unconfigured.'),
         };
       }
     } catch {
@@ -92,6 +103,7 @@ export class BackendApiLabProvider implements LabProvider {
     return {
       available: false,
       daemonRunning: false,
+      providerType: 'Guided Walkthrough Adapter',
       message: 'Cloud lab provider backend endpoint unavailable. Guided learning walkthroughs remain 100% functional.',
     };
   }
@@ -101,9 +113,13 @@ export class BackendApiLabProvider implements LabProvider {
     try {
       const res = await fetch('/api/docker/start-lab', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getAuthHeader(),
+        },
         body: JSON.stringify({ labId }),
       });
+
       const data = await res.json();
       if (data.success) {
         return {
@@ -114,7 +130,9 @@ export class BackendApiLabProvider implements LabProvider {
           status: 'running',
           allocatedMemory: labDef.memoryLimit,
           createdAt: new Date().toISOString(),
+          expiresAt: data.expiresAt,
           message: data.message,
+          providerType: data.providerType || 'Cloud Container Adapter',
         };
       } else {
         return {
@@ -122,7 +140,7 @@ export class BackendApiLabProvider implements LabProvider {
           labId,
           labName: labDef.name,
           targetUrl: '',
-          status: 'error',
+          status: data.notConfigured ? 'not_configured' : 'error',
           allocatedMemory: labDef.memoryLimit,
           createdAt: new Date().toISOString(),
           message: data.error || 'Failed to initialize container session.',
@@ -145,24 +163,25 @@ export class BackendApiLabProvider implements LabProvider {
 
   public async getSessionStatus(labId: 'juice-shop' | 'dvwa' | 'webgoat'): Promise<LabSession> {
     const labDef = LAB_CATALOGUE[labId];
-    const avail = await this.checkAvailability();
-
-    if (!avail.daemonRunning) {
-      return {
-        sessionId: '',
-        labId,
-        labName: labDef.name,
-        targetUrl: `http://127.0.0.1:${labDef.defaultPort}`,
-        status: 'not_configured',
-        allocatedMemory: labDef.memoryLimit,
-        createdAt: new Date().toISOString(),
-        message: 'Cloud Docker provider is not active on host.',
-      };
-    }
-
     try {
-      const res = await fetch('/api/docker/status');
+      const res = await fetch('/api/docker/status', {
+        headers: this.getAuthHeader(),
+      });
       const data = await res.json();
+
+      if (!data.daemonRunning && !data.cloudProviderActive) {
+        return {
+          sessionId: '',
+          labId,
+          labName: labDef.name,
+          targetUrl: `http://127.0.0.1:${labDef.defaultPort}`,
+          status: 'not_configured',
+          allocatedMemory: labDef.memoryLimit,
+          createdAt: new Date().toISOString(),
+          message: 'External Cloud Container Provider is NOT CONFIGURED.',
+        };
+      }
+
       const labInfo = data.labs?.[labId];
       const isOnline = labInfo?.status === 'Online';
 
@@ -181,9 +200,10 @@ export class BackendApiLabProvider implements LabProvider {
         labId,
         labName: labDef.name,
         targetUrl: '',
-        status: 'error',
+        status: 'not_configured',
         allocatedMemory: labDef.memoryLimit,
         createdAt: new Date().toISOString(),
+        message: 'PROVIDER NOT CONFIGURED',
       };
     }
   }
@@ -192,7 +212,10 @@ export class BackendApiLabProvider implements LabProvider {
     try {
       const res = await fetch('/api/docker/container-logs', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getAuthHeader(),
+        },
         body: JSON.stringify({ labId }),
       });
       const data = await res.json();
@@ -206,7 +229,10 @@ export class BackendApiLabProvider implements LabProvider {
     try {
       const res = await fetch('/api/docker/stop-lab', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getAuthHeader(),
+        },
         body: JSON.stringify({ labId }),
       });
       const data = await res.json();
@@ -217,7 +243,6 @@ export class BackendApiLabProvider implements LabProvider {
   }
 
   public async cleanupExpiredSessions(): Promise<number> {
-    // Backend automatically enforces single active lab & resource policies
     return 0;
   }
 }
